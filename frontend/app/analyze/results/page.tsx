@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Send, Link as LinkIcon } from "lucide-react";
@@ -118,6 +118,73 @@ export default function AnalyzePage() {
       setIsChatLoading(false);
     }
   }
+
+  const cleanedTextForView = analysisData?.cleaned_text ?? "";
+
+  const articleLayout = useMemo(() => {
+    if (!cleanedTextForView) {
+      return {
+        highlights: [] as string[],
+        sections: [] as { title: string | null; paragraphs: string[] }[],
+      };
+    }
+
+    const blocks = cleanedTextForView
+      .split(/\n{2,}/)
+      .map((block: string) => block.trim())
+      .filter(Boolean);
+
+    const isTitleLike = (block: string) => {
+      const wordCount = block.split(/\s+/).length;
+      return (
+        block.length <= 90 &&
+        wordCount <= 12 &&
+        !/[.]$/.test(block) &&
+        !/^\d+[.)]/.test(block)
+      );
+    };
+
+    const highlights: string[] = [];
+    const sections: { title: string | null; paragraphs: string[] }[] = [];
+
+    for (let i = 0; i < blocks.length; i += 1) {
+      const block = blocks[i];
+      const nextBlock = blocks[i + 1];
+
+      if (isTitleLike(block)) {
+        if (nextBlock && !isTitleLike(nextBlock)) {
+          sections.push({ title: block, paragraphs: [nextBlock] });
+          i += 1;
+        } else {
+          highlights.push(block);
+        }
+        continue;
+      }
+
+      const lastSection = sections[sections.length - 1];
+      if (lastSection && lastSection.paragraphs.length < 2) {
+        lastSection.paragraphs.push(block);
+      } else {
+        sections.push({ title: null, paragraphs: [block] });
+      }
+    }
+
+    return { highlights, sections };
+  }, [cleanedTextForView]);
+
+  const articleStats = useMemo(() => {
+    const words = cleanedTextForView.trim()
+      ? cleanedTextForView.trim().split(/\s+/).length
+      : 0;
+    const readTimeMin = words > 0 ? Math.max(1, Math.round(words / 220)) : 0;
+
+    return {
+      words,
+      readTimeMin,
+      sectionCount: articleLayout.sections.length,
+    };
+  }, [cleanedTextForView, articleLayout.sections.length]);
+
    if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -128,11 +195,9 @@ export default function AnalyzePage() {
 
 
   const {
-    cleaned_text,
     facts = [],
     sentiment,
     perspective,
-    score,
   } = analysisData;
 
   
@@ -173,12 +238,70 @@ export default function AnalyzePage() {
               </TabsList>
 
               <TabsContent value="summary">
-                <div className="prose max-w-none">
-                  {cleaned_text
-                    .split("\n\n")
-                    .map((para: string, idx: number) => (
-                      <p key={idx}>{para}</p>
-                    ))}
+                <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-b from-card via-card to-card/70 p-5 sm:p-7">
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-primary/10 to-transparent" />
+
+                  <div className="relative mb-6 flex flex-wrap gap-2">
+                    <Badge variant="outline">{articleStats.sectionCount} sections</Badge>
+                    <Badge variant="outline">{articleStats.words} words</Badge>
+                    <Badge variant="outline">~{articleStats.readTimeMin} min read</Badge>
+                  </div>
+
+                  {articleLayout.highlights.length > 0 && (
+                    <section className="relative mb-5 rounded-xl border border-border/70 bg-background/40 p-4 sm:p-5">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-primary/90">
+                        Article Highlights
+                      </p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {articleLayout.highlights.map((headline: string, idx: number) => (
+                          <div
+                            key={`${headline}-${idx}`}
+                            className="rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-sm font-medium text-foreground/90"
+                          >
+                            {headline}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  <div className="relative space-y-4 sm:space-y-5">
+                    {articleLayout.sections.map(
+                      (
+                        section: { title: string | null; paragraphs: string[] },
+                        idx: number
+                      ) => (
+                        <article
+                          key={idx}
+                          className="rounded-xl border border-border/70 bg-background/40 p-4 sm:p-5"
+                        >
+                          <div className="mb-3 flex items-center gap-3">
+                            <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-primary/15 px-2 text-xs font-semibold text-primary">
+                              {(idx + 1).toString().padStart(2, "0")}
+                            </span>
+                            <h3 className="text-lg font-semibold leading-snug text-foreground">
+                              {section.title ?? `Key Point ${idx + 1}`}
+                            </h3>
+                          </div>
+
+                          <div className="space-y-3">
+                            {section.paragraphs.map((paragraph: string, pIdx: number) => (
+                              <p
+                                key={pIdx}
+                                className={`text-base leading-8 text-foreground/90 ${
+                                  idx === 0 && pIdx === 0
+                                    ? "first-letter:float-left first-letter:mr-2 first-letter:text-3xl first-letter:font-semibold first-letter:leading-none"
+                                    : ""
+                                }`}
+                              >
+                                {paragraph}
+                              </p>
+                            ))}
+                          </div>
+                        </article>
+                      )
+                    )}
+                  </div>
                 </div>
               </TabsContent>
 
