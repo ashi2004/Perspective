@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import BiasMeter from "@/components/bias-meter";
 import axios from "axios";
 
-const backend_url = process.env.NEXT_PUBLIC_API_URL;
+const backendUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").trim();
 
 /**
  * Renders the article analysis page with summary, perspectives, fact checks, bias meter, AI chat, and sources.
@@ -32,6 +32,7 @@ export default function AnalyzePage() {
   const [activeTab, setActiveTab] = useState("summary");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isChatLoading, setIsChatLoading] = useState(false);
   const [messages, setMessages] = useState<{ role: string; content: string }[]>(
     [
       {
@@ -80,20 +81,42 @@ export default function AnalyzePage() {
 
   async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
-    if (!message.trim()) return;
-    const newMessages = [...messages, { role: "user", content: message }];
+    const userMessage = message.trim();
+    if (!userMessage || isChatLoading) return;
+
+    const newMessages = [...messages, { role: "user", content: userMessage }];
     setMessages(newMessages);
     setMessage("");
+    setIsChatLoading(true);
 
-    const res = await axios.post(`${backend_url}/api/chat`, {
-      message: message,
-    });
-    const data = res.data;
+    try {
+      const articleContext = analysisData?.cleaned_text?.trim() ?? "";
+      const res = await axios.post(
+        `${backendUrl}/api/chat`,
+        {
+          message: userMessage,
+          article_context: articleContext,
+        },
+        { timeout: 45000 }
+      );
+      const answer = res.data?.answer ?? "I could not generate an answer right now.";
 
-    console.log(data);
-
-    // 🔹 Step 2: Append LLM’s response
-    setMessages([...newMessages, { role: "assistant", content: data.answer }]);
+      setMessages([...newMessages, { role: "assistant", content: answer }]);
+    } catch (error: any) {
+      const fallback =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Chat request failed. Please try again.";
+      setMessages([
+        ...newMessages,
+        {
+          role: "assistant",
+          content: `Sorry, I couldn't fetch a reply: ${fallback}`,
+        },
+      ]);
+    } finally {
+      setIsChatLoading(false);
+    }
   }
    if (isLoading) {
     return (
@@ -187,10 +210,10 @@ export default function AnalyzePage() {
                             <Badge
                               variant={
                                 fact.verdict === "True"
-                                  ? "success"
+                                  ? "secondary"
                                   : fact.verdict === "False"
                                   ? "destructive"
-                                  : "warning"
+                                  : "outline"
                               }
                             >
                               {fact.verdict}
@@ -255,7 +278,7 @@ export default function AnalyzePage() {
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                   />
-                  <Button type="submit" disabled={!message.trim()}>
+                  <Button type="submit" disabled={!message.trim() || isChatLoading}>
                     <Send />
                   </Button>
                 </form>
